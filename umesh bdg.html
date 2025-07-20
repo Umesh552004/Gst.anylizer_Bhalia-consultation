@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bhalia Solution – GST Analyzer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #0d1117;
+      color: #f9fafb;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      padding: 20px;
+      background: #161b22;
+      text-align: center;
+      font-size: 1.5rem;
+      color: #facc15;
+      font-weight: bold;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 20px auto;
+      padding: 20px;
+      background: #161b22;
+      border-radius: 8px;
+    }
+    .upload-section {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    input[type=file] {
+      padding: 10px;
+      background: #facc15;
+      border-radius: 5px;
+      cursor: pointer;
+      color: #000;
+      font-weight: bold;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      border: 1px solid #333;
+      padding: 8px;
+      text-align: left;
+    }
+    th {
+      background: #1f2937;
+      color: #facc15;
+    }
+    tr:nth-child(even) {
+      background: #1f1f1f;
+    }
+    button {
+      padding: 10px 20px;
+      margin-top: 20px;
+      background: #3b82f6;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: bold;
+      color: #000;
+    }
+  </style>
+</head>
+<body>
+  <header>Bhalia Solution – GST Analyzer</header>
+  <div class="container">
+    <div class="upload-section">
+      <input type="file" id="fileInput" accept=".xlsx, .xls, .csv" />
+    </div>
+    <div id="result"></div>
+    <button id="downloadBtn" style="display:none;">Download Summary (Excel)</button>
+  </div>
+
+  <script>
+    document.getElementById('fileInput').addEventListener('change', handleFile, false);
+
+    function handleFile(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function (event) {
+        const data = new Uint8Array(event.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        let sheet = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
+
+        let headerRowIndex = sheet.findIndex(row => row.includes('Supplier Name'));
+        if (headerRowIndex === -1) {
+          alert('Could not detect column headers like Supplier Name.');
+          return;
+        }
+        let headers = sheet[headerRowIndex];
+        let dataRows = sheet.slice(headerRowIndex + 1);
+        let jsonData = dataRows.map(row => {
+          let obj = {};
+          headers.forEach((h, i) => { obj[h] = row[i]; });
+          return obj;
+        });
+
+        processData(jsonData);
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function processData(rows) {
+      const grouped = {};
+      const rates = new Set();
+      rows.forEach(row => {
+        const party = row['Supplier Name'] || 'Unknown';
+        const gstNo = row['GSTIN/UIN'] || row['GSTIN'] || '';
+        const rate = row['RATE'] || 0;
+        const value = parseFloat(row['Taxable Value'] || 0);
+        rates.add(rate);
+        if (!grouped[party]) grouped[party] = { gstNo, totals: {} };
+        if (!grouped[party].totals[rate]) grouped[party].totals[rate] = 0;
+        grouped[party].totals[rate] += value;
+      });
+      renderTable(grouped, Array.from(rates).sort((a, b) => a - b));
+    }
+
+    function renderTable(grouped, rates) {
+      let html = '<table><tr><th>Sr. No.</th><th>Party Name</th><th>GST No.</th>';
+      rates.forEach(rate => {
+        html += `<th>${rate}%</th>`;
+      });
+      html += '<th>Total</th></tr>';
+
+      let srNo = 1;
+      const grandTotals = {};
+      let grandTotalOverall = 0;
+
+      for (const party in grouped) {
+        let total = 0;
+        html += `<tr><td>${srNo++}</td><td>${party}</td><td>${grouped[party].gstNo}</td>`;
+        rates.forEach(rate => {
+          const val = grouped[party].totals[rate] || 0;
+          total += val;
+          grandTotals[rate] = (grandTotals[rate] || 0) + val;
+          html += `<td>${val.toFixed(2)}</td>`;
+        });
+        grandTotalOverall += total;
+        html += `<td>${total.toFixed(2)}</td></tr>`;
+      }
+
+      // Grand total row
+      html += '<tr style="font-weight:bold; background:#1f2937; color:#facc15;">';
+      html += '<td colspan="3">Grand Total</td>';
+      rates.forEach(rate => {
+        html += `<td>${(grandTotals[rate] || 0).toFixed(2)}</td>`;
+      });
+      html += `<td>${grandTotalOverall.toFixed(2)}</td></tr>`;
+
+      html += '</table>';
+      document.getElementById('result').innerHTML = html;
+      document.getElementById('downloadBtn').style.display = 'inline-block';
+    }
+
+    document.getElementById('downloadBtn').addEventListener('click', () => {
+      const table = document.querySelector('table');
+      const wb = XLSX.utils.table_to_book(table, { sheet: 'Summary' });
+      XLSX.writeFile(wb, 'GST_Summary.xlsx');
+    });
+  </script>
+</body>
+</html>
